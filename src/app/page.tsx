@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 
 export default function Home() {
   const [input, setInput] = useState("");
@@ -27,28 +28,65 @@ export default function Home() {
     historyRef.current?.scrollTo({ top: historyRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length]);
 
-  const PLACEHOLDER: Record<string, string> = {
-    "course registration period":
-      "The course registration period for Semester 1, 2025/2026 is 22–25 September 2025. Please complete your registration within this period at http://amd.utm.my.",
-    "Course Information":
-      "Course information, credit hours, and prerequisites will be available here. Please check back soon.",
-    "Timetable Generation":
-      "Timetable generation guidance will appear here. This will be populated once the API is connected.",
-    "Study Plan Guidance":
-      "Study plan guidance will be displayed here based on your program and intake session.",
-    FAQs:
-      "Frequently asked questions will appear here. In the meantime, feel free to ask anything.",
-  };
+  const userIdRef = useRef<string>("");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = "rasa_sender_id";
+    const existing = localStorage.getItem(key);
+    if (existing) {
+      userIdRef.current = existing;
+    } else {
+      const id = "web-" + Math.random().toString(36).slice(2, 10);
+      userIdRef.current = id;
+      localStorage.setItem(key, id);
+    }
+  }, []);
 
-  function appendUserAndBot(userText: string) {
-    const nextId = messages.length + 1;
-    const botText = PLACEHOLDER[userText] ||
-      `Thanks for your message about "${userText}". A detailed response will appear here once the API is available.`;
+  async function appendUserAndBot(userText: string) {
+    const trimmed = userText.trim();
+    if (!trimmed) return;
+
+    // Append the user's message first
     setMessages((m) => [
       ...m,
-      { id: nextId, role: "user", text: userText, style: "chip" },
-      { id: nextId + 1, role: "assistant", text: botText, style: "long" },
+      { id: m.length + 1, role: "user", text: trimmed, style: "chip" },
     ]);
+
+    try {
+      const res = await fetch("/api/rasa", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sender: userIdRef.current || "web-user", message: trimmed }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data: Array<{ recipient_id?: string; text?: string }> = await res.json();
+      const texts = data
+        .map((d) => d.text)
+        .filter((t): t is string => typeof t === "string" && t.trim().length > 0);
+
+      if (texts.length === 0) {
+        setMessages((m) => [
+          ...m,
+          { id: m.length + 1, role: "assistant", text: "No response from server.", style: "long" },
+        ]);
+        return;
+      }
+
+      setMessages((m) => {
+        let id = m.length + 1;
+        const adds = texts.map((t) => ({ id: id++, role: "assistant" as const, text: t, style: "long" as const }));
+        return [...m, ...adds];
+      });
+    } catch (err) {
+      setMessages((m) => [
+        ...m,
+        { id: m.length + 1, role: "assistant", text: "Sorry, I couldn't reach the server. Please try again.", style: "long" },
+      ]);
+    }
   }
 
   function handleSend() {
@@ -56,6 +94,10 @@ export default function Home() {
     if (!value) return;
     appendUserAndBot(value);
     setInput("");
+  }
+
+  function handleReset() {
+    setMessages([]);
   }
 
   const quickReplies = [
@@ -71,7 +113,9 @@ export default function Home() {
       <main className="w-full max-w-4xl border border-black rounded-none bg-white">
         <div className="px-6 pt-6 pb-4">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded bg-black text-white flex items-center justify-center text-lg">🤖</div>
+            <div className="w-10 h-10 rounded overflow-hidden border border-zinc-300 bg-white flex items-center justify-center">
+              <Image src="/chatbot-icon-master-unclean.png" alt="UTM Assistant" width={40} height={40} className="w-10 h-10 object-cover" />
+            </div>
             <div className="flex-1">
               <div className="flex items-center gap-2">
                 <h1 className="text-[18px] font-semibold">UTM Campus Assistance Chatbot</h1>
@@ -88,7 +132,16 @@ export default function Home() {
             <span className="inline-block h-4 w-4 rounded-full border border-zinc-500" />
             <span>Conversation History</span>
           </div>
-          <div className="text-xs border border-zinc-400 rounded-full px-3 py-1">{messages.length} messages</div>
+          <div className="flex items-center gap-2">
+            <div className="text-xs border border-zinc-400 rounded-full px-3 py-1">{messages.length} messages</div>
+            <button
+              onClick={handleReset}
+              className="text-xs border border-zinc-400 rounded-full px-3 py-1 hover:bg-zinc-100"
+              aria-label="Reset conversation"
+            >
+              Reset
+            </button>
+          </div>
         </div>
 
         <div ref={historyRef} className="px-4 py-4 space-y-6 max-h-[520px] overflow-y-auto">
@@ -96,7 +149,9 @@ export default function Home() {
             <div key={m.id} className="w-full">
               {m.role === "assistant" ? (
                 <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded bg-zinc-200 flex items-center justify-center text-lg">🤖</div>
+                  <div className="w-10 h-10 rounded overflow-hidden border border-zinc-300 bg-white flex items-center justify-center">
+                    <Image src="/chatbot-icon.png" alt="UTM Assistant" width={40} height={40} className="w-10 h-10 object-cover" />
+                  </div>
                   <div className="flex-1">
                     <div className="text-[10px] text-zinc-500">UTM Assistant · Today</div>
                     <div
